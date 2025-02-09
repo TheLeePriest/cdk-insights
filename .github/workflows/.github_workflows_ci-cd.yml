@@ -1,0 +1,22 @@
+name: CDK AI Analyzer CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Install Dependencies
+        run: npm install -g aws-cdk typescript ts-node jq
+
+      - name: Run CDK AI Analyzer Tests
+        run: chmod +x test-runner.sh && ./test-runner.sh
