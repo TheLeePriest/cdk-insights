@@ -1,0 +1,29 @@
+{
+  "issues": [
+    "🚨 S3 Bucket has no versioning. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice** (UnversionedBucketB57EF69A)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (TestVPCPublicSubnet1NATGateway6A40FA74)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (TestVPCPublicSubnet2NATGatewayBE12FD22)",
+    "🚨 RDS Instance is publicly accessible. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice** (PublicRdsInstance805BB7B8)",
+    "🚨 API Gateway is publicly accessible. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice** (PublicApiGatewayF01A7430)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (SecurityVpcPublicSubnet1NATGatewayF5099139)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (SecurityVpcPublicSubnet2NATGatewayE457FBCE)",
+    "🚨 Security Group allows unrestricted ingress. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice** (OpenSecurityGroup67EBF257)",
+    "🚨 Step Function lacks logging configuration. 🔹 **STRIDE: Repudiation** 🔹 **AWS WAF: Security Best Practice** (UnloggedStepFunctionC8347E18)",
+    "🚨 OpenSearch Domain lacks node-to-node encryption. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice** (InsecureOpenSearch)",
+    "🚨 Redshift Cluster is publicly accessible. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice** (PublicRedshift)",
+    "🚨 EventBridge Rule does not specify an EventBus. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice** (UnroutedEventBridgeRuleB6EFF271)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (EC2VpcPublicSubnet1NATGateway10E37B4E)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (EC2VpcPublicSubnet2NATGatewayBD3C35B2)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (NatVpcPublicSubnet1NATGateway6BDC14C8)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (NatVpcPublicSubnet2NATGateway5A6177B9)",
+    "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (UnusedNAT)"
+  ],
+  "recommendations": [],
+  "optimizations": [
+    "💡 Lambda function has high memory allocation. 🔹 **AWS WAF: Cost Optimization** (HighMemoryLambda07B8E0BF)",
+    "💡 DynamoDB table has no auto-scaling enabled. 🔹 **AWS WAF: Cost Optimization** (UnoptimizedDynamoDB5EAE59B0)",
+    "💡 EC2 instance is using an older t2 instance. 🔹 **AWS WAF: Cost Optimization** (LegacyT2InstanceD38D8D21)"
+  ],
+  "timestamp": "2025-02-09T22:57:47.468Z",
+  "status": "failed"
+}
