@@ -1,6 +1,6 @@
 {
   "issues": [
-    "🚨 S3 Bucket has no versioning. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice** (UnversionedBucketB57EF69A)",
+    "🚨 S3 Bucket has no versioning enabled. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice** (UnversionedBucketB57EF69A)",
     "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (TestVPCPublicSubnet1NATGateway6A40FA74)",
     "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (TestVPCPublicSubnet2NATGatewayBE12FD22)",
     "🚨 RDS Instance is publicly accessible. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice** (PublicRdsInstance805BB7B8)",
@@ -18,12 +18,20 @@
     "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (NatVpcPublicSubnet2NATGateway5A6177B9)",
     "🚨 NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization** (UnusedNAT)"
   ],
-  "recommendations": [],
+  "recommendations": [
+    "[\n  {\n    \"resourceId\": \"InsecureIamRole41A4AD76\",\n    \"issues\": [\n      {\n        \"category\": \"Security\",\n        \"issue\": \"Insecure IAM role\",\n        \"recommendation\": \"Use least-privilege permissions\",\n        \"cloudFormation\": \"{\\\"Statement\\\":[{\\\"Action\\\":\\\"sts:AssumeRole\\\",\\\"Effect\\\":\\\"Allow\\\",\\\"Principal\\\":{\\\"Service{URL-1}\"ec2.amazonaws.com\\\"}},{\\\"Action\\\":\\\"sts:AssumeRole\\\",\\\"Effect\\\":\\\"Allow\\\",\\\"Principal\\\":{\\\"Service\\\":\\\"{URL-2}\\\"}}]}\",\n        \"lineNumber\": \"12\",\n        \"severity\": \"Critical\"\n      }\n    ],\n    \"costAnalysis\": {\n      \"estimatedMonthlyCost\": \"$50\",\n      \"optimizations\": [\n        {\n          \"resource\": \"AWS::IAM::Role\",\n          \"estimatedMonthlyCost\": \"$20\",\n          \"optimizationSuggestion\": \"Use least-privilege permissions\"\n        }\n      ]\n    }\n  }\n]",
+    "- Ensure the severity is labeled as Critical, High, Medium, or Low.\n[\n  {\n    \"resourceId\": \"UnversionedBucketB57EF69A\",\n    \"issues\": [\n      {\n        \"category\": \"Security\",\n        \"issue\": \"Unencrypted bucket\",\n        \"recommendation\": \"Encrypt the bucket with SSE-S3 or SSE-KMS\",\n        \"cdkFile\": \"Unknown\",\n        \"lineNumber\": \"Unknown\",\n        \"severity\": \"Critical\"\n      }\n    ],\n    \"costAnalysis\": {\n      \"estimatedMonthlyCost\": \"Unknown\",\n      \"optimizations\": [\n        {\n          \"resource\": \"AWS::S3::Bucket\",\n          \"estimatedMonthlyCost\": \"Unknown\",\n          \"optimizationSuggestion\": \"Encrypt the bucket with SSE-S3 or SSE-KMS\"\n        }\n      ]\n    }\n  }\n]"
+  ],
   "optimizations": [
     "💡 Lambda function has high memory allocation. 🔹 **AWS WAF: Cost Optimization** (HighMemoryLambda07B8E0BF)",
     "💡 DynamoDB table has no auto-scaling enabled. 🔹 **AWS WAF: Cost Optimization** (UnoptimizedDynamoDB5EAE59B0)",
     "💡 EC2 instance is using an older t2 instance. 🔹 **AWS WAF: Cost Optimization** (LegacyT2InstanceD38D8D21)"
   ],
-  "timestamp": "2025-02-09T22:57:47.468Z",
-  "status": "failed"
+  "timestamp": "2025-02-12T18:25:46.370Z",
+  "status": "failed",
+  "tokenUsage": {
+    "inputTokens": 0,
+    "outputTokens": 0,
+    "estimatedCost": 0
+  }
 }

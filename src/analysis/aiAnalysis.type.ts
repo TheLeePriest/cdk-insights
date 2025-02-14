@@ -1,27 +1,44 @@
 export type CloudFormationStack = {
+  AWSTemplateFormatVersion?: string;
+  Description?: string;
+  Parameters?: Record<string, CloudFormationParameter>;
   Resources: Record<string, CloudFormationResource>;
-  Mappings?: Record<string, unknown>;
-  Conditions?: Record<string, unknown>;
-  Outputs?: Record<string, unknown>;
+  Mappings?: Record<string, CloudFormationMapping>;
+  Conditions?: Record<string, CloudFormationCondition>;
+  Outputs?: Record<string, CloudFormationOutput>;
   Metadata?: Record<string, unknown>;
 };
 
 export type CloudFormationResource = {
   Type: string;
-  Properties: {
-    PolicyDocument?: {
-      Statement?: Array<{
-        Action?: string;
-      }>;
-    };
-    SecurityGroupIngress?: Array<{
-      CidrIp?: string;
-    }>;
-    [key: string]: unknown;
-  };
+  Properties?: Record<string, any>; // Allow any CloudFormation properties
   Metadata?: {
     'aws:cdk:path'?: string;
   };
+  DependsOn?: string | string[];
+  Condition?: string;
+};
+
+export type CloudFormationParameter = {
+  Type: string;
+  Default?: string | number | boolean;
+  Description?: string;
+  AllowedValues?: (string | number)[];
+  AllowedPattern?: string;
+  ConstraintDescription?: string;
+};
+
+export type CloudFormationMapping = Record<
+  string,
+  Record<string, string | number>
+>;
+
+export type CloudFormationCondition = Record<string, unknown>;
+
+export type CloudFormationOutput = {
+  Description?: string;
+  Value: string | Record<string, any>;
+  Export?: { Name: string };
 };
 
 export type BedrockResponse = {
@@ -54,3 +71,10 @@ export type AnalysisResult = {
     estimatedCost: number;
   };
 };
+
+export enum AnalysisMode {
+  Security = 'security',
+  CostOptimization = 'cost',
+  Compliance = 'compliance',
+  RiskScoring = 'risk',
+}

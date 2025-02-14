@@ -1,192 +1,555 @@
-import { CloudFormationStack } from './staticAnalysis.type';
 import fs from 'fs';
-import path from 'path';
-const INPUT_COST_PER_1000 = 0.00163;
-const OUTPUT_COST_PER_1000 = 0.00551;
+import { CloudFormationStack } from './staticAnalysis.type';
 
-export const analyzeStack = async (
-  stack: CloudFormationStack
-): Promise<{ issues: string[]; optimizations: string[] }> => {
-  const issues: string[] = [];
-  const optimizations: string[] = [];
-  console.log(stack.Resources, 'the stack.Resources');
-  for (const [resourceId, resource] of Object.entries(stack.Resources)) {
-    console.log(resourceId, 'the resourceId');
-    console.log(resource, 'the resource');
-    const resourceType = resource.Type;
+// Define possible security findings
+export interface SecurityFinding {
+  resource: string;
+  issue: string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  category: string;
+}
 
-    const addIssue = (message: string) =>
-      issues.push(`🚨 ${message} (${resourceId})`);
-    const addOptimization = (message: string) =>
-      optimizations.push(`💡 ${message} (${resourceId})`);
-    console.log(resourceType, 'resourceType');
-    // Security Checks - Mapped to STRIDE & AWS Well-Architected Framework
-    const securityChecks = [
-      {
-        condition:
-          resourceType === 'AWS::IAM::Policy' &&
-          resource.Properties?.PolicyDocument?.Statement?.some(
-            (stmt: any) => stmt.Action === '*'
-          ),
-        message:
-          'IAM Policy allows all actions (*). 🔹 **STRIDE: Elevation of Privilege** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::S3::Bucket' &&
-          !resource.Properties?.VersioningConfiguration,
-        message:
-          'S3 Bucket has no versioning. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::EC2::SecurityGroup' &&
-          resource.Properties?.SecurityGroupIngress?.some(
-            (rule: any) => rule.CidrIp === '0.0.0.0/0'
-          ),
-        message:
-          'Security Group allows unrestricted ingress. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::ApiGateway::RestApi' &&
-          !resource.Properties?.EndpointConfiguration?.Types?.includes(
-            'PRIVATE'
-          ),
-        message:
-          'API Gateway is publicly accessible. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::Cognito::UserPool' &&
-          !resource.Properties?.Policies?.PasswordPolicy,
-        message:
-          'Cognito User Pool has no password policy set. 🔹 **STRIDE: Spoofing** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::Cognito::UserPool' &&
-          !resource.Properties?.AccountRecoverySetting,
-        message:
-          'Cognito User Pool does not have account recovery configured. 🔹 **STRIDE: Repudiation** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::RDS::DBInstance' &&
-          resource.Properties?.PubliclyAccessible,
-        message:
-          'RDS Instance is publicly accessible. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::Redshift::Cluster' &&
-          resource.Properties?.PubliclyAccessible,
-        message:
-          'Redshift Cluster is publicly accessible. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::VPC' &&
-          !resource.Properties?.EnableDnsHostnames,
-        message:
-          'VPC does not have DNS hostnames enabled. 🔹 **STRIDE: Information Disclosure** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::OpenSearchService::Domain' &&
-          !resource.Properties?.NodeToNodeEncryptionOptions?.Enabled,
-        message:
-          'OpenSearch Domain lacks node-to-node encryption. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::ElastiCache::Cluster' &&
-          !resource.Properties?.TransitEncryptionEnabled,
-        message:
-          'ElastiCache Cluster lacks transit encryption. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::ElasticBeanstalk::Environment' &&
-          !resource.Properties?.OptionSettings?.some(
-            (setting: any) =>
-              setting.Namespace === 'aws:elasticbeanstalk:environment' &&
-              setting.OptionName === 'EnvironmentType' &&
-              setting.Value === 'LoadBalanced'
-          ),
-        message:
-          'Elastic Beanstalk Environment is not Load Balanced. 🔹 **STRIDE: Denial of Service** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::StepFunctions::StateMachine' &&
-          !resource.Properties?.LoggingConfiguration,
-        message:
-          'Step Function lacks logging configuration. 🔹 **STRIDE: Repudiation** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::Events::Rule' &&
-          !resource.Properties?.EventBusName,
-        message:
-          'EventBridge Rule does not specify an EventBus. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::EC2::NatGateway' &&
-          !resource.Properties?.SubnetRouteTableAssociations,
-        message:
-          'NAT Gateway is deployed but lacks a route table association. 🔹 **AWS WAF: Cost Optimization**',
-      },
-    ];
+export const loadCloudFormationTemplate = (templatePath: string): any =>
+  JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
 
-    securityChecks.forEach(
-      ({ condition, message }) => condition && addIssue(message)
-    );
+// ----------------------------
+// 🔍 Logging Utility
+// ----------------------------
+const logFinding = (finding: SecurityFinding) => {
+  const colorMap: Record<string, string> = {
+    LOW: '\x1b[32m', // Green
+    MEDIUM: '\x1b[33m', // Yellow
+    HIGH: '\x1b[31m', // Red
+    CRITICAL: '\x1b[41m', // Red Background
+  };
 
-    // Cost Optimizations - Mapped to AWS Well-Architected Framework Cost Pillar
-    const costOptimizations = [
-      {
-        condition:
-          resourceType === 'AWS::Lambda::Function' &&
-          (Number(resource.Properties?.MemorySize) || 0) > 1024,
-        message:
-          'Lambda function has high memory allocation. 🔹 **AWS WAF: Cost Optimization**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::DynamoDB::Table' &&
-          !resource.Properties?.BillingMode,
-        message:
-          'DynamoDB table has no auto-scaling enabled. 🔹 **AWS WAF: Cost Optimization**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::EC2::Instance' &&
-          resource.Properties?.InstanceType?.toString().startsWith('t2'),
-        message:
-          'EC2 instance is using an older t2 instance. 🔹 **AWS WAF: Cost Optimization**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::SQS::Queue' &&
-          !resource.Properties?.KmsMasterKeyId,
-        message:
-          'SQS Queue does not use KMS encryption. 🔹 **STRIDE: Tampering** 🔹 **AWS WAF: Security Best Practice**',
-      },
-      {
-        condition:
-          resourceType === 'AWS::EC2::NatGateway' &&
-          resource.Properties?.SubnetRouteTableAssociations,
-        message:
-          'Review NAT Gateway usage for cost efficiency. 🔹 **AWS WAF: Cost Optimization**',
-      },
-    ];
+  const resetColor = '\x1b[0m';
+  console.log(
+    `${colorMap[finding.severity]}[${finding.severity}] ${finding.category}: ${finding.issue} (${finding.resource})${resetColor}`
+  );
+};
 
-    costOptimizations.forEach(
-      ({ condition, message }) => condition && addOptimization(message)
-    );
+// ----------------------------
+// IAM Policy Checks
+// ----------------------------
+export const checkIamPolicies = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::IAM::Policy' || resource.Type === 'AWS::IAM::Role'
+        ? (resource.Properties?.PolicyDocument?.Statement || [])
+            .filter(
+              (stmt: any) =>
+                stmt.Effect === 'Allow' &&
+                stmt.Action.includes('*') &&
+                stmt.Resource.includes('*')
+            )
+            .map(() => ({
+              resource: resourceName,
+              issue: 'IAM policy allows full access to all resources.',
+              severity: 'CRITICAL',
+              category: 'Security',
+            }))
+        : []
+  );
+
+// ----------------------------
+// S3 Bucket Checks
+// ----------------------------
+export const checkS3Buckets = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::S3::Bucket'
+        ? ([
+            !resource.Properties?.BucketEncryption
+              ? {
+                  resource: resourceName,
+                  issue: 'S3 Bucket lacks encryption.',
+                  severity: 'HIGH',
+                  category: 'Security',
+                }
+              : null,
+            resource.Properties?.PublicAccessBlockConfiguration
+              ?.BlockPublicAcls === false
+              ? {
+                  resource: resourceName,
+                  issue: 'S3 Bucket allows public ACLs.',
+                  severity: 'CRITICAL',
+                  category: 'Security',
+                }
+              : null,
+            !resource.Properties?.VersioningConfiguration
+              ? {
+                  resource: resourceName,
+                  issue: 'S3 Bucket has no versioning enabled.',
+                  severity: 'MEDIUM',
+                  category: 'Security',
+                }
+              : null,
+          ].filter(Boolean) as SecurityFinding[])
+        : []
+  );
+
+// ----------------------------
+// Security Group Checks
+// ----------------------------
+export const checkSecurityGroups = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::EC2::SecurityGroup' &&
+      resource.Properties?.SecurityGroupIngress?.some(
+        (rule: any) => rule.CidrIp === '0.0.0.0/0'
+      )
+        ? [
+            {
+              resource: resourceName,
+              issue: 'Security Group allows unrestricted ingress.',
+              severity: 'HIGH',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// API Gateway Checks
+// ----------------------------
+export const checkApiGateway = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::ApiGateway::RestApi' &&
+      !resource.Properties?.EndpointConfiguration?.Types?.includes('PRIVATE')
+        ? [
+            {
+              resource: resourceName,
+              issue: 'API Gateway is publicly accessible.',
+              severity: 'HIGH',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// Secrets Manager Checks
+// ----------------------------
+export const checkSecretsManager = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::SecretsManager::Secret' &&
+      resource.Properties?.PublicPolicy
+        ? [
+            {
+              resource: resourceName,
+              issue: 'Secret is publicly accessible.',
+              severity: 'CRITICAL',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// KMS Checks
+// ----------------------------
+export const checkKMSKeys = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::KMS::Key' &&
+      resource.Properties?.KeyPolicy?.Statement?.some(
+        (s: any) => s.Principal === '*'
+      )
+        ? [
+            {
+              resource: resourceName,
+              issue: 'KMS key has a public policy.',
+              severity: 'CRITICAL',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// SNS Checks
+// ----------------------------
+export const checkSNS = (template: CloudFormationStack): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::SNS::Topic' &&
+      !resource.Properties?.KmsMasterKeyId
+        ? [
+            {
+              resource: resourceName,
+              issue: 'SNS topic is not encrypted.',
+              severity: 'HIGH',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// SQS Checks
+// ----------------------------
+export const checkSQS = (template: CloudFormationStack): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::SQS::Queue' &&
+      !resource.Properties?.KmsMasterKeyId
+        ? [
+            {
+              resource: resourceName,
+              issue: 'SQS queue is not encrypted.',
+              severity: 'HIGH',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// EventBridge Rules Checks
+// ----------------------------
+export const checkEventBridgeRules = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::Events::Rule' &&
+      resource.Properties?.State !== 'ENABLED'
+        ? [
+            {
+              resource: resourceName,
+              issue: 'EventBridge rule is disabled.',
+              severity: 'MEDIUM',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// Lambda Environment Variables Checks
+// ----------------------------
+export const checkLambdaEnvironmentVariables = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::Lambda::Function'
+        ? Object.entries(resource.Properties?.Environment?.Variables || {})
+            .filter(([key]) => /secret|password|token|key/i.test(key))
+            .map(([key]) => ({
+              resource: resourceName,
+              issue: `Lambda function contains sensitive environment variable: ${key}.`,
+              severity: 'HIGH',
+              category: 'Security',
+            }))
+        : []
+  );
+
+// ----------------------------
+// RDS Encryption Checks
+// ----------------------------
+export const checkRdsEncryption = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::RDS::DBInstance' &&
+      !resource.Properties?.StorageEncrypted
+        ? [
+            {
+              resource: resourceName,
+              issue: 'RDS instance is not encrypted.',
+              severity: 'HIGH',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// DynamoDB Streams Checks
+// ----------------------------
+export const checkDynamoDBStreams = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::DynamoDB::Table' &&
+      !resource.Properties?.StreamSpecification
+        ? [
+            {
+              resource: resourceName,
+              issue: 'DynamoDB table does not have streams enabled.',
+              severity: 'MEDIUM',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// Step Functions Logging Checks
+// ----------------------------
+export const checkStepFunctions = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::StepFunctions::StateMachine' &&
+      resource.Properties?.LoggingConfiguration === undefined
+        ? [
+            {
+              resource: resourceName,
+              issue: 'Step Function lacks logging configuration.',
+              severity: 'HIGH',
+              category: 'Security',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// CloudTrail Logging Checks
+// ----------------------------
+export const checkCloudTrailLogging = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).some(
+    ([_, resource]) => resource.Type === 'AWS::CloudTrail::Trail'
+  )
+    ? []
+    : [
+        {
+          resource: 'Global',
+          issue: 'CloudTrail is not enabled for logging.',
+          severity: 'HIGH',
+          category: 'Security',
+        },
+      ];
+
+// ----------------------------
+// Cost Optimization Checks
+// ----------------------------
+
+export const checkLambdaMemory = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::Lambda::Function' &&
+      (Number(resource.Properties?.MemorySize) || 0) > 1024
+        ? [
+            {
+              resource: resourceName,
+              issue:
+                'Lambda function has high memory allocation. Consider reducing memory for cost savings.',
+              severity: 'MEDIUM',
+              category: 'Cost Optimization',
+            },
+          ]
+        : []
+  );
+
+export const checkDynamoDBAutoScaling = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::DynamoDB::Table' &&
+      !resource.Properties?.BillingMode
+        ? [
+            {
+              resource: resourceName,
+              issue:
+                'DynamoDB table has no auto-scaling enabled. Enable auto-scaling to reduce costs.',
+              severity: 'MEDIUM',
+              category: 'Cost Optimization',
+            },
+          ]
+        : []
+  );
+
+export const checkEC2InstanceType = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::EC2::Instance' &&
+      resource.Properties?.InstanceType?.toString().startsWith('t2')
+        ? [
+            {
+              resource: resourceName,
+              issue:
+                'EC2 instance is using an older t2 instance. Consider upgrading to t3 for better performance and cost savings.',
+              severity: 'MEDIUM',
+              category: 'Cost Optimization',
+            },
+          ]
+        : []
+  );
+
+export const checkS3IntelligentTiering = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::S3::Bucket' &&
+      !resource.Properties?.IntelligentTieringConfiguration
+        ? [
+            {
+              resource: resourceName,
+              issue:
+                'S3 Bucket does not use Intelligent-Tiering. Consider enabling it for cost optimization.',
+              severity: 'LOW',
+              category: 'Cost Optimization',
+            },
+          ]
+        : []
+  );
+
+export const checkRDSMultiAZ = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::RDS::DBInstance' &&
+      resource.Properties?.MultiAZ &&
+      resource.Properties?.StorageType === 'gp2'
+        ? [
+            {
+              resource: resourceName,
+              issue:
+                'RDS instance is using Multi-AZ with gp2 storage. Consider gp3 for lower costs.',
+              severity: 'MEDIUM',
+              category: 'Cost Optimization',
+            },
+          ]
+        : []
+  );
+
+export const checkEBSUnusedVolumes = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::EC2::Volume' && !resource.Properties?.Attachments
+        ? [
+            {
+              resource: resourceName,
+              issue:
+                'EBS Volume is not attached to any instance. Consider deleting to save costs.',
+              severity: 'HIGH',
+              category: 'Cost Optimization',
+            },
+          ]
+        : []
+  );
+
+export const checkNATGatewayUsage = (
+  template: CloudFormationStack
+): SecurityFinding[] =>
+  Object.entries(template.Resources || {}).flatMap(
+    ([resourceName, resource]) =>
+      resource.Type === 'AWS::EC2::NatGateway' &&
+      !resource.Properties?.SubnetRouteTableAssociations
+        ? [
+            {
+              resource: resourceName,
+              issue:
+                'NAT Gateway exists but lacks a route table association. Review usage to avoid unnecessary costs.',
+              severity: 'LOW',
+              category: 'Cost Optimization',
+            },
+          ]
+        : []
+  );
+
+// ----------------------------
+// **Main Analysis Function**
+// ----------------------------
+export const analyzeTemplate = (
+  cloudformationTemplate: CloudFormationStack,
+  selectedServices: string[] = []
+): SecurityFinding[] => {
+  const serviceChecks: {
+    [key: string]: ((template: CloudFormationStack) => SecurityFinding[])[];
+  } = {
+    IAM: [checkIamPolicies],
+    S3: [checkS3Buckets, checkS3IntelligentTiering],
+    SecurityGroup: [checkSecurityGroups],
+    ApiGateway: [checkApiGateway],
+    SecretsManager: [checkSecretsManager],
+    KMS: [checkKMSKeys],
+    SNS: [checkSNS],
+    SQS: [checkSQS],
+    EventBridge: [checkEventBridgeRules],
+    Lambda: [checkLambdaEnvironmentVariables, checkLambdaMemory],
+    RDS: [checkRdsEncryption, checkRDSMultiAZ],
+    DynamoDB: [checkDynamoDBStreams],
+    StepFunctions: [checkStepFunctions],
+    CloudTrail: [checkCloudTrailLogging],
+    DynamoDBAutoScaling: [checkDynamoDBAutoScaling],
+    EC2: [checkEC2InstanceType],
+    EBS: [checkEBSUnusedVolumes],
+    NATGateway: [checkNATGatewayUsage],
+  };
+
+  const checks = selectedServices.length
+    ? selectedServices.flatMap((service) =>
+        serviceChecks[service] ? serviceChecks[service] : []
+      )
+    : Object.values(serviceChecks).flat();
+
+  const findings = checks.flatMap((check) => check(cloudformationTemplate));
+
+  if (findings.length === 0) {
+    console.log('\x1b[32m✅ No security or cost issues detected!\x1b[0m\n');
+    process.exit(0);
   }
 
-  return { issues, optimizations };
+  return findings;
+
+  // Split findings into Security vs Cost Optimization
+  //   const securityFindings = findings.filter((f) => f.category === 'Security');
+  //   const costFindings = findings.filter(
+  //     (f) => f.category === 'Cost Optimization'
+  //   );
+
+  //   console.log('\n🚨 Security Findings:');
+  //   securityFindings.forEach(logFinding);
+  //   console.log(`\n🔴 Total Security Issues Found: ${securityFindings.length}\n`);
+
+  //   console.log('\n💰 Cost Optimization Suggestions:');
+  //   costFindings.forEach(logFinding);
+  //   console.log(
+  //     `\n🟡 Total Cost Optimization Suggestions: ${costFindings.length}\n`
+  //   );
+
+  //   // Set exit codes:
+  //   if (securityFindings.some((f) => f.severity === 'CRITICAL')) {
+  //     console.error(
+  //       '\x1b[41m❌ Critical security issues detected! Failing pipeline.\x1b[0m'
+  //     );
+  //     process.exit(2);
+  //   } else if (findings.length > 0) {
+  //     console.warn(
+  //       '\x1b[33m⚠️ Issues detected. Review before deployment.\x1b[0m'
+  //     );
+  //     process.exit(1);
+  //   }
 };

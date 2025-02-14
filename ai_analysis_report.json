@@ -1,0 +1,92 @@
+{
+  "0": {
+    "resource": "HighMemoryLambda07B8E0BF",
+    "issue": "Lambda function has high memory allocation. Consider reducing memory for cost savings.",
+    "severity": "MEDIUM",
+    "category": "Cost Optimization"
+  },
+  "CustomVpcRestrictDefaultSGCustomResourceProviderHandlerDC833E5E": {
+    "security": {
+      "inputTextTokenCount": 825,
+      "results": [
+        {
+          "tokenCount": 186,
+          "outputText": "\n\n{\n  \"resourceId\": \"CustomVpcRestrictDefaultSGCustomResourceProviderHandlerDC833E5E\",\n  \"issues\": [\n    {\n      \"category\": \"security\",\n      \"issue\": \"The Lambda function has a wide permission allowing to read and write to all resources in the AWS account.\",\n      \"recommendation\": \"Restrict the permission to only the required resources.\",\n      \"severity\": \"High\"\n    }\n  ],\n  \"costAnalysis\": {\n    \"estimatedMonthlyCost\": \"$0.01\",\n    \"optimizations\": [\n      {\n        \"resource\": \"AWS::Lambda::Function\",\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizationSuggestion\": \"Use a smaller function size.\"\n      }\n    ]\n  }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    },
+    "cost": {
+      "inputTextTokenCount": 825,
+      "results": [
+        {
+          "tokenCount": 186,
+          "outputText": "\n\n{\n  \"resourceId\": \"CustomVpcRestrictDefaultSGCustomResourceProviderHandlerDC833E5E\",\n  \"issues\": [\n    {\n      \"category\": \"security\",\n      \"issue\": \"The Lambda function has a wide permission allowing to read and write to all resources in the AWS account.\",\n      \"recommendation\": \"Restrict the permission to only the required resources.\",\n      \"severity\": \"High\"\n    }\n  ],\n  \"costAnalysis\": {\n    \"estimatedMonthlyCost\": \"$0.01\",\n    \"optimizations\": [\n      {\n        \"resource\": \"AWS::Lambda::Function\",\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizationSuggestion\": \"Use a smaller function size.\"\n      }\n    ]\n  }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    },
+    "compliance": {
+      "inputTextTokenCount": 825,
+      "results": [
+        {
+          "tokenCount": 186,
+          "outputText": "\n\n{\n  \"resourceId\": \"CustomVpcRestrictDefaultSGCustomResourceProviderHandlerDC833E5E\",\n  \"issues\": [\n    {\n      \"category\": \"security\",\n      \"issue\": \"The Lambda function has a wide permission allowing to read and write to all resources in the AWS account.\",\n      \"recommendation\": \"Restrict the permission to only the required resources.\",\n      \"severity\": \"High\"\n    }\n  ],\n  \"costAnalysis\": {\n    \"estimatedMonthlyCost\": \"$0.01\",\n    \"optimizations\": [\n      {\n        \"resource\": \"AWS::Lambda::Function\",\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizationSuggestion\": \"Use a smaller function size.\"\n      }\n    ]\n  }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    },
+    "risk": {
+      "inputTextTokenCount": 825,
+      "results": [
+        {
+          "tokenCount": 186,
+          "outputText": "\n\n{\n  \"resourceId\": \"CustomVpcRestrictDefaultSGCustomResourceProviderHandlerDC833E5E\",\n  \"issues\": [\n    {\n      \"category\": \"security\",\n      \"issue\": \"The Lambda function has a wide permission allowing to read and write to all resources in the AWS account.\",\n      \"recommendation\": \"Restrict the permission to only the required resources.\",\n      \"severity\": \"High\"\n    }\n  ],\n  \"costAnalysis\": {\n    \"estimatedMonthlyCost\": \"$0.01\",\n    \"optimizations\": [\n      {\n        \"resource\": \"AWS::Lambda::Function\",\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizationSuggestion\": \"Use a smaller function size.\"\n      }\n    ]\n  }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    }
+  },
+  "HighMemoryLambda07B8E0BF": {
+    "security": {
+      "inputTextTokenCount": 772,
+      "results": [
+        {
+          "tokenCount": 118,
+          "outputText": "\n\n{\n    \"resourceId\": \"HighMemoryLambda07B8E0BF\",\n    \"issues\": [\n        {\n            \"category\": \"security\",\n            \"issue\": \"Resource uses latest AWS managed policy\",\n            \"recommendation\": \"Update the policy to align with your security standards\",\n            \"severity\": \"Medium\"\n        }\n    ],\n    \"costAnalysis\": {\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizations\": []\n    }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    },
+    "cost": {
+      "inputTextTokenCount": 772,
+      "results": [
+        {
+          "tokenCount": 118,
+          "outputText": "\n\n{\n    \"resourceId\": \"HighMemoryLambda07B8E0BF\",\n    \"issues\": [\n        {\n            \"category\": \"security\",\n            \"issue\": \"Resource uses latest AWS managed policy\",\n            \"recommendation\": \"Update the policy to align with your security standards\",\n            \"severity\": \"Medium\"\n        }\n    ],\n    \"costAnalysis\": {\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizations\": []\n    }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    },
+    "compliance": {
+      "inputTextTokenCount": 772,
+      "results": [
+        {
+          "tokenCount": 118,
+          "outputText": "\n\n{\n    \"resourceId\": \"HighMemoryLambda07B8E0BF\",\n    \"issues\": [\n        {\n            \"category\": \"security\",\n            \"issue\": \"Resource uses latest AWS managed policy\",\n            \"recommendation\": \"Update the policy to align with your security standards\",\n            \"severity\": \"Medium\"\n        }\n    ],\n    \"costAnalysis\": {\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizations\": []\n    }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    },
+    "risk": {
+      "inputTextTokenCount": 772,
+      "results": [
+        {
+          "tokenCount": 118,
+          "outputText": "\n\n{\n    \"resourceId\": \"HighMemoryLambda07B8E0BF\",\n    \"issues\": [\n        {\n            \"category\": \"security\",\n            \"issue\": \"Resource uses latest AWS managed policy\",\n            \"recommendation\": \"Update the policy to align with your security standards\",\n            \"severity\": \"Medium\"\n        }\n    ],\n    \"costAnalysis\": {\n        \"estimatedMonthlyCost\": \"$0.01\",\n        \"optimizations\": []\n    }\n}\n",
+          "completionReason": "FINISH"
+        }
+      ]
+    }
+  }
+}

@@ -1,11 +1,12 @@
+// helpers/writeAnalysisResultsFile.ts
 import fs from 'fs';
-import { AnalysisResult } from '../analysis/aiAnalysis.type';
+import path from 'path';
 
-export const writeAnalysisResultsFile = (analysisResult: AnalysisResult) => {
+export const writeAnalysisResultsFile = (analysisResult: any): void => {
+  const outputPath = path.resolve('cdk-insights.json');
   fs.writeFileSync(
-    'cdk-insights.json',
-    JSON.stringify(analysisResult, null, 2)
+    outputPath,
+    JSON.stringify(analysisResult, null, 2),
+    'utf-8'
   );
-  fs.unlinkSync('cdk-output.json');
-  console.log('📂 Recommendations saved to cdk-insights.json');
 };
