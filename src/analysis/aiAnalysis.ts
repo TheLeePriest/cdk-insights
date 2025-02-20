@@ -10,8 +10,12 @@ import { CloudFormationResource } from './aiAnalysis.type';
 export interface SecurityFinding {
   resource: string;
   issue: string;
+  recommendation: string;
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  category: string;
 }
+
+export type AnalysisResults = Record<string, { issues: SecurityFinding[] }>;
 
 // Initialize AWS Bedrock AI Client
 const bedrockClient = new BedrockRuntimeClient();
@@ -98,17 +102,23 @@ const sendPromptToAI = async <T>(prompt: string): Promise<T> => {
   while (retries > 0) {
     try {
       const response = await bedrockClient.send(command);
-      let responseBody = new TextDecoder().decode(response.body);
+      let responseBody = JSON.parse(new TextDecoder().decode(response.body));
+      const [completeMessage] =
+        extractJsonFromMarkdown(responseBody.results?.[0]?.outputText) || '';
+      console.log(completeMessage, 'the completeMessage');
 
-      // **Remove any markdown formatting (```json ... ```) if present**
-      responseBody = responseBody.replace(/```json|```/g, '').trim();
+      if (!completeMessage) {
+        throw new Error('AI response did not contain valid results.');
+      }
 
-      // **Attempt to parse valid JSON**
       try {
-        return JSON.parse(responseBody) as T;
+        return completeMessage as T;
       } catch (jsonError) {
-        console.error(`❌ Failed to parse AI response as JSON:`, responseBody);
-        throw new Error('AI response did not contain valid JSON.');
+        console.error(
+          `❌ Failed to parse AI response outputText as JSON:`,
+          completeMessage
+        );
+        throw new Error('AI outputText did not contain valid JSON.');
       }
     } catch (error: any) {
       if (error['$metadata']?.httpStatusCode === 429) {
@@ -126,6 +136,40 @@ const sendPromptToAI = async <T>(prompt: string): Promise<T> => {
   throw new Error('Max retries reached for AI request.');
 };
 
+const extractJsonFromResponse = (responseText: string) => {
+  try {
+    const jsonStart = responseText.indexOf('{');
+    const jsonEnd = responseText.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1) {
+      throw new Error('JSON not found in AI response.');
+    }
+
+    const jsonString = responseText.substring(jsonStart, jsonEnd + 1);
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error('❌ Failed to extract JSON from AI response:', error);
+    return null;
+  }
+};
+
+const extractJsonFromMarkdown = (response: string): any | null => {
+  const parts = response.split('```');
+
+  if (parts.length < 3) {
+    console.error('❌ No valid JSON block found in response.');
+    return null;
+  }
+
+  const jsonString = parts[1].trim();
+
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error('❌ Failed to parse JSON:', error);
+    return null;
+  }
+};
+
 const generatePrompt = (
   resourceId: string,
   resource: any,
@@ -135,7 +179,7 @@ const generatePrompt = (
     ? `File: ${resource.Metadata.sourceLocation.file}, Line: ${resource.Metadata.sourceLocation.line}`
     : 'Unknown source location';
 
-  // Dynamically include only the requested analysis categories in the instructions
+  // Define descriptions for analysis categories
   const modeDescriptions: Record<AnalysisMode, string> = {
     security: 'Identify security vulnerabilities and misconfigurations.',
     cost: 'Analyze cost inefficiencies and suggest optimizations.',
@@ -143,78 +187,74 @@ const generatePrompt = (
     risk: 'Assess operational risks and stability issues.',
   };
 
-  const selectedDescriptions = modes.length
-    ? modes
-        .map((mode) => `- **${mode.toUpperCase()}**: ${modeDescriptions[mode]}`)
-        .join('\n')
-    : Object.values(modeDescriptions)
-        .map((desc) => `- ${desc}`)
-        .join('\n'); // Use all if no mode specified
+  const selectedDescriptions = modes
+    .map((mode) => `- **${mode.toUpperCase()}**: ${modeDescriptions[mode]}`)
+    .join('\n');
 
-  return `
-    You are an AWS CloudFormation expert. Analyze the following resource for security, cost, and performance improvements.
-    Provide ONLY JSON output using the exact format below. DO NOT include any extra text. Use the following analysis modes: ${selectedDescriptions}.
-    IMPORTANT: Under no circumstances should you output any error message such as "Sorry - this model is unable to respond to this request".
-    
-    **Resource Details:**
-    - **Resource ID:** ${resourceId}
-    - **Resource Type:** ${resource['Type']}
-    - **CloudFormation JSON:** ${JSON.stringify(resource, null, 2)}
-    - **${sourceLocation}**
-    
-    ---
-    
-    Replace the placeholders below with the actual findings and recommendations using the following format:
-    {
-      "resourceId": "${resourceId}",
-      "issues": [
-        {
-          "category": "${modes.join(' | ')}",
-          "issue": "Describe the detected issue in a single sentence.",
-          "recommendation": "Provide an actionable fix in maximum of three sentences.",
-          "severity": "Critical | High | Medium | Low"
-        }
-      ],
-      "costAnalysis": ${
-        modes.includes(AnalysisMode.CostOptimization)
-          ? `{
-        "estimatedMonthlyCost": "$[real calculated cost]/month",
-        "optimizations": [
-          {
-            "resource": "${resource['Type']}",
-            "estimatedMonthlyCost": "$[real cost]",
-            "optimizationSuggestion": "Provide a meaningful cost-saving measure"
-          }
-        ]
-      }`
-          : '{}'
-      }
-    }
+  const aiPrompt = `
+    I want a structured JSON object that contains information about the supplied AWS Cloudformation resource, without any other text at all.
 
-    Only return JSON. No explanations or extra text. Ensure all fields are filled with real data.
-    `.trim();
+    This is the CloudFormation resource you need to analyze: ${resource}
+
+    The object should contain the resource ID and then an object with the key of 'issues' and 'issues' should be an array of objects.
+    Each object in the 'issues' array should have a 'resource' parameter with a value of ${resourceId}, an 'issue' parameter that has a value describes the detected issue in the format of text, a 'recommendation' parameter that has a value that provides an actionable fix in form of text, a 'severity' parameter that has a value of one of 'Critical', 'High', 'Medium', or 'Low', and a 'category' parameter that has a value of one of 'Security', 'Compliance', 'Cost Optimization', or 'Operational Excellence'.
+
+    For each resource you return the JSON object I described above but in a JSON.stringify() format.
+
+    You should only return the valid JSON object and nothing else. You should never include any part of the instructions your are provided in your response. Do not include any markdown in your response.
+
+    For context: You are an AWS CloudFormation analysis expert. You love to look at CloudFormation resources and provide analysis back to users on how they can improve their resources. You are an expert in security, compliance, cost optimization, and operational excellence. You are able to identify issues in these areas and provide actionable recommendations to fix them. You are able to provide this information in a structured JSON format. Your responses will be used in a tool so you must ALWAYS response with ONLY the JSON object and nothing else.
+  `;
+
+  return aiPrompt;
 };
 
 const analyzeSingleResource = async (
   resourceName: string,
   resource: CloudFormationResource,
   modes: AnalysisMode[]
-): Promise<SecurityFinding[]> => {
+): Promise<{ issues: SecurityFinding[] }> => {
   const resourceHash = generateResourceHash(resource);
   if (CACHE.has(resourceHash)) {
-    return CACHE.get(resourceHash)!;
+    return { issues: CACHE.get(resourceHash)! };
   }
 
-  const essentialInfo = extractEssentialResourceInfo(resource);
   const prompt = generatePrompt(resourceName, resource, modes);
 
   try {
-    const findings = await sendPromptToAI<SecurityFinding[]>(prompt);
-    CACHE.set(resourceHash, findings);
-    return findings;
+    // Expecting AI response in the new JSON format
+    const aiResponse = await sendPromptToAI<{
+      resource: string;
+      issues: SecurityFinding[];
+    }>(prompt);
+
+    if (!aiResponse) {
+      console.error(
+        `❌ AI response is invalid for ${resourceName}:`,
+        aiResponse
+      );
+      return { issues: [] };
+    }
+    console.log(
+      aiResponse,
+      'aiResponseaiResponseaiResponseaiResponseaiResponseaiResponse'
+    );
+    // Ensure consistency by setting "source: 'ai'"
+    const formattedFindings: SecurityFinding[] = aiResponse.issues.map(
+      (issue) => ({
+        resource: aiResponse.resource,
+        issue: issue.issue,
+        recommendation: issue.recommendation,
+        severity: issue.severity,
+        category: issue.category,
+      })
+    );
+
+    CACHE.set(resourceHash, formattedFindings);
+    return { issues: formattedFindings };
   } catch (error) {
     console.error(`❌ AI Analysis failed for ${resourceName}:`, error);
-    return [];
+    return { issues: [] };
   }
 };
 
@@ -222,32 +262,16 @@ const analyzeSingleResource = async (
 export const analyzeMultipleResources = async (
   resources: Record<string, CloudFormationResource>,
   modes: AnalysisMode[] = DEFAULT_MODES
-): Promise<Record<string, Record<AnalysisMode, SecurityFinding[]>>> => {
-  const results: Record<string, Record<AnalysisMode, SecurityFinding[]>> = {};
+): Promise<AnalysisResults> => {
+  const results: Record<string, { issues: SecurityFinding[] }> = {};
 
   for (const [resourceName, resource] of Object.entries(resources)) {
-    for (const mode of modes) {
-      try {
-        console.log(`🔍 Analyzing ${resourceName} (${mode})...`);
+    const findings = await analyzeSingleResource(resourceName, resource, modes);
 
-        const findings = await analyzeSingleResource(
-          resourceName,
-          resource,
-          modes
-        );
-
-        if (!results[resourceName]) {
-          results[resourceName] = {} as Record<AnalysisMode, SecurityFinding[]>;
-        }
-
-        results[resourceName][mode] = findings;
-
-        // **Small delay between requests to avoid rapid consecutive calls**
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      } catch (error) {
-        console.error(`❌ AI Analysis failed for ${resourceName}:`, error);
-      }
+    if (!results[resourceName]) {
+      results[resourceName] = { issues: [] };
     }
+    results[resourceName].issues.push(...findings.issues);
   }
 
   return results;

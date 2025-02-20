@@ -7,7 +7,10 @@ export interface SecurityFinding {
   issue: string;
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   category: string;
+  recommendation?: string;
 }
+
+export type AnalysisResults = Record<string, { issues: SecurityFinding[] }>;
 
 export const loadCloudFormationTemplate = (templatePath: string): any =>
   JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
@@ -30,28 +33,58 @@ const logFinding = (finding: SecurityFinding) => {
 };
 
 // ----------------------------
+// Generic Finding Generator
+// ----------------------------
+const createFinding = (
+  resource: string,
+  issue: string,
+  recommendation: string,
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+  category: string
+): SecurityFinding => ({
+  resource,
+  issue,
+  recommendation,
+  severity,
+  category,
+});
+
+// ----------------------------
 // IAM Policy Checks
 // ----------------------------
 export const checkIamPolicies = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::IAM::Policy' || resource.Type === 'AWS::IAM::Role'
-        ? (resource.Properties?.PolicyDocument?.Statement || [])
-            .filter(
-              (stmt: any) =>
-                stmt.Effect === 'Allow' &&
-                stmt.Action.includes('*') &&
-                stmt.Resource.includes('*')
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::IAM::Policy' ||
+        resource.Type === 'AWS::IAM::Role'
+      ) {
+        const findings = (resource.Properties?.PolicyDocument?.Statement || [])
+          .filter(
+            (stmt: any) =>
+              stmt.Effect === 'Allow' &&
+              stmt.Action.includes('*') &&
+              stmt.Resource.includes('*')
+          )
+          .map(() =>
+            createFinding(
+              resourceName,
+              'IAM policy allows full access to all resources.',
+              'Restrict IAM policies to least privilege access.',
+              'CRITICAL',
+              'Security'
             )
-            .map(() => ({
-              resource: resourceName,
-              issue: 'IAM policy allows full access to all resources.',
-              severity: 'CRITICAL',
-              category: 'Security',
-            }))
-        : []
+          );
+
+        if (findings.length > 0) {
+          acc[resourceName] = { issues: findings };
+        }
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -59,38 +92,56 @@ export const checkIamPolicies = (
 // ----------------------------
 export const checkS3Buckets = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::S3::Bucket'
-        ? ([
-            !resource.Properties?.BucketEncryption
-              ? {
-                  resource: resourceName,
-                  issue: 'S3 Bucket lacks encryption.',
-                  severity: 'HIGH',
-                  category: 'Security',
-                }
-              : null,
-            resource.Properties?.PublicAccessBlockConfiguration
-              ?.BlockPublicAcls === false
-              ? {
-                  resource: resourceName,
-                  issue: 'S3 Bucket allows public ACLs.',
-                  severity: 'CRITICAL',
-                  category: 'Security',
-                }
-              : null,
-            !resource.Properties?.VersioningConfiguration
-              ? {
-                  resource: resourceName,
-                  issue: 'S3 Bucket has no versioning enabled.',
-                  severity: 'MEDIUM',
-                  category: 'Security',
-                }
-              : null,
-          ].filter(Boolean) as SecurityFinding[])
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (resource.Type === 'AWS::S3::Bucket') {
+        const findings: SecurityFinding[] = [];
+
+        if (!resource.Properties?.BucketEncryption) {
+          findings.push(
+            createFinding(
+              resourceName,
+              'S3 Bucket lacks encryption.',
+              'Enable encryption at rest for better security.',
+              'HIGH',
+              'Security'
+            )
+          );
+        }
+        if (
+          resource.Properties?.PublicAccessBlockConfiguration
+            ?.BlockPublicAcls === false
+        ) {
+          findings.push(
+            createFinding(
+              resourceName,
+              'S3 Bucket allows public ACLs.',
+              'Restrict ACLs to prevent unauthorized access.',
+              'CRITICAL',
+              'Security'
+            )
+          );
+        }
+        if (!resource.Properties?.VersioningConfiguration) {
+          findings.push(
+            createFinding(
+              resourceName,
+              'S3 Bucket has no versioning enabled.',
+              'Enable versioning to protect against accidental deletions.',
+              'MEDIUM',
+              'Security'
+            )
+          );
+        }
+
+        if (findings.length > 0) {
+          acc[resourceName] = { issues: findings };
+        }
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -98,22 +149,30 @@ export const checkS3Buckets = (
 // ----------------------------
 export const checkSecurityGroups = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::EC2::SecurityGroup' &&
-      resource.Properties?.SecurityGroupIngress?.some(
-        (rule: any) => rule.CidrIp === '0.0.0.0/0'
-      )
-        ? [
-            {
-              resource: resourceName,
-              issue: 'Security Group allows unrestricted ingress.',
-              severity: 'HIGH',
-              category: 'Security',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::EC2::SecurityGroup' &&
+        resource.Properties?.SecurityGroupIngress?.some(
+          (rule: any) => rule.CidrIp === '0.0.0.0/0'
+        )
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'Security Group allows unrestricted ingress.',
+              'Restrict security group rules to specific IPs and ports.',
+              'HIGH',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -121,20 +180,28 @@ export const checkSecurityGroups = (
 // ----------------------------
 export const checkApiGateway = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::ApiGateway::RestApi' &&
-      !resource.Properties?.EndpointConfiguration?.Types?.includes('PRIVATE')
-        ? [
-            {
-              resource: resourceName,
-              issue: 'API Gateway is publicly accessible.',
-              severity: 'HIGH',
-              category: 'Security',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::ApiGateway::RestApi' &&
+        !resource.Properties?.EndpointConfiguration?.Types?.includes('PRIVATE')
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'API Gateway is publicly accessible.',
+              'Use PRIVATE endpoints to restrict access.',
+              'HIGH',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -142,81 +209,112 @@ export const checkApiGateway = (
 // ----------------------------
 export const checkSecretsManager = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::SecretsManager::Secret' &&
-      resource.Properties?.PublicPolicy
-        ? [
-            {
-              resource: resourceName,
-              issue: 'Secret is publicly accessible.',
-              severity: 'CRITICAL',
-              category: 'Security',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::SecretsManager::Secret' &&
+        resource.Properties?.PublicPolicy
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'Secret is publicly accessible.',
+              'Restrict secret access using IAM policies to ensure only authorized entities can retrieve it.',
+              'CRITICAL',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
 // KMS Checks
 // ----------------------------
-export const checkKMSKeys = (
-  template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::KMS::Key' &&
-      resource.Properties?.KeyPolicy?.Statement?.some(
-        (s: any) => s.Principal === '*'
-      )
-        ? [
-            {
-              resource: resourceName,
-              issue: 'KMS key has a public policy.',
-              severity: 'CRITICAL',
-              category: 'Security',
-            },
-          ]
-        : []
+export const checkKMSKeys = (template: CloudFormationStack): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::KMS::Key' &&
+        resource.Properties?.KeyPolicy?.Statement?.some(
+          (s: any) => s.Principal === '*'
+        )
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'KMS key has a public policy.',
+              'Restrict the KMS key policy to specific IAM roles or users to prevent unauthorized access.',
+              'CRITICAL',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
 // SNS Checks
 // ----------------------------
-export const checkSNS = (template: CloudFormationStack): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::SNS::Topic' &&
-      !resource.Properties?.KmsMasterKeyId
-        ? [
-            {
-              resource: resourceName,
-              issue: 'SNS topic is not encrypted.',
-              severity: 'HIGH',
-              category: 'Security',
-            },
-          ]
-        : []
+export const checkSNS = (template: CloudFormationStack): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::SNS::Topic' &&
+        !resource.Properties?.KmsMasterKeyId
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'SNS topic is not encrypted.',
+              'Enable AWS KMS encryption for SNS to protect sensitive messages in transit and at rest.',
+              'HIGH',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
 // SQS Checks
 // ----------------------------
-export const checkSQS = (template: CloudFormationStack): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::SQS::Queue' &&
-      !resource.Properties?.KmsMasterKeyId
-        ? [
+export const checkSQS = (template: CloudFormationStack): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::SQS::Queue' &&
+        !resource.Properties?.KmsMasterKeyId
+      ) {
+        acc[resourceName] = {
+          issues: [
             {
               resource: resourceName,
               issue: 'SQS queue is not encrypted.',
+              recommendation:
+                'Enable AWS KMS encryption for SQS to protect message data in transit and at rest.',
               severity: 'HIGH',
               category: 'Security',
             },
-          ]
-        : []
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -224,20 +322,28 @@ export const checkSQS = (template: CloudFormationStack): SecurityFinding[] =>
 // ----------------------------
 export const checkEventBridgeRules = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::Events::Rule' &&
-      resource.Properties?.State !== 'ENABLED'
-        ? [
-            {
-              resource: resourceName,
-              issue: 'EventBridge rule is disabled.',
-              severity: 'MEDIUM',
-              category: 'Security',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::Events::Rule' &&
+        resource.Properties?.State !== 'ENABLED'
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'EventBridge rule is disabled.',
+              'Ensure the EventBridge rule is enabled to trigger events as expected.',
+              'MEDIUM',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -245,19 +351,31 @@ export const checkEventBridgeRules = (
 // ----------------------------
 export const checkLambdaEnvironmentVariables = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::Lambda::Function'
-        ? Object.entries(resource.Properties?.Environment?.Variables || {})
-            .filter(([key]) => /secret|password|token|key/i.test(key))
-            .map(([key]) => ({
-              resource: resourceName,
-              issue: `Lambda function contains sensitive environment variable: ${key}.`,
-              severity: 'HIGH',
-              category: 'Security',
-            }))
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (resource.Type === 'AWS::Lambda::Function') {
+        const findings = Object.entries(
+          resource.Properties?.Environment?.Variables || {}
+        )
+          .filter(([key]) => /secret|password|token|key/i.test(key))
+          .map(([key]) =>
+            createFinding(
+              resourceName,
+              `Lambda function contains sensitive environment variable: ${key}.`,
+              'Store sensitive environment variables in AWS Secrets Manager or SSM Parameter Store instead of plaintext environment variables.',
+              'HIGH',
+              'Security'
+            )
+          );
+
+        if (findings.length > 0) {
+          acc[resourceName] = { issues: findings };
+        }
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -265,20 +383,28 @@ export const checkLambdaEnvironmentVariables = (
 // ----------------------------
 export const checkRdsEncryption = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::RDS::DBInstance' &&
-      !resource.Properties?.StorageEncrypted
-        ? [
-            {
-              resource: resourceName,
-              issue: 'RDS instance is not encrypted.',
-              severity: 'HIGH',
-              category: 'Security',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::RDS::DBInstance' &&
+        !resource.Properties?.StorageEncrypted
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'RDS instance is not encrypted.',
+              'Enable encryption for data security.',
+              'HIGH',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -286,20 +412,28 @@ export const checkRdsEncryption = (
 // ----------------------------
 export const checkDynamoDBStreams = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::DynamoDB::Table' &&
-      !resource.Properties?.StreamSpecification
-        ? [
-            {
-              resource: resourceName,
-              issue: 'DynamoDB table does not have streams enabled.',
-              severity: 'MEDIUM',
-              category: 'Security',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::DynamoDB::Table' &&
+        !resource.Properties?.StreamSpecification
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'DynamoDB table does not have streams enabled.',
+              'Enable DynamoDB Streams to capture item-level changes for analytics, auditing, and replication.',
+              'MEDIUM',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -307,20 +441,28 @@ export const checkDynamoDBStreams = (
 // ----------------------------
 export const checkStepFunctions = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::StepFunctions::StateMachine' &&
-      resource.Properties?.LoggingConfiguration === undefined
-        ? [
-            {
-              resource: resourceName,
-              issue: 'Step Function lacks logging configuration.',
-              severity: 'HIGH',
-              category: 'Security',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::StepFunctions::StateMachine' &&
+        resource.Properties?.LoggingConfiguration === undefined
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'Step Function lacks logging configuration.',
+              'Enable logging for the Step Function using AWS CloudWatch to improve monitoring and debugging.',
+              'HIGH',
+              'Security'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -328,19 +470,27 @@ export const checkStepFunctions = (
 // ----------------------------
 export const checkCloudTrailLogging = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).some(
+): AnalysisResults => {
+  const hasCloudTrail = Object.entries(template.Resources || {}).some(
     ([_, resource]) => resource.Type === 'AWS::CloudTrail::Trail'
-  )
-    ? []
-    : [
-        {
-          resource: 'Global',
-          issue: 'CloudTrail is not enabled for logging.',
-          severity: 'HIGH',
-          category: 'Security',
+  );
+
+  return hasCloudTrail
+    ? {}
+    : {
+        Global: {
+          issues: [
+            createFinding(
+              'Global',
+              'CloudTrail is not enabled for logging.',
+              'Enable AWS CloudTrail to capture API activity and improve security monitoring.',
+              'HIGH',
+              'Security'
+            ),
+          ],
         },
-      ];
+      };
+};
 
 // ----------------------------
 // Cost Optimization Checks
@@ -348,135 +498,185 @@ export const checkCloudTrailLogging = (
 
 export const checkLambdaMemory = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::Lambda::Function' &&
-      (Number(resource.Properties?.MemorySize) || 0) > 1024
-        ? [
-            {
-              resource: resourceName,
-              issue:
-                'Lambda function has high memory allocation. Consider reducing memory for cost savings.',
-              severity: 'MEDIUM',
-              category: 'Cost Optimization',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::Lambda::Function' &&
+        (Number(resource.Properties?.MemorySize) || 0) > 1024
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'Lambda function has high memory allocation.',
+              'Consider reducing memory for cost savings.',
+              'MEDIUM',
+              'Cost Optimization'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 export const checkDynamoDBAutoScaling = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::DynamoDB::Table' &&
-      !resource.Properties?.BillingMode
-        ? [
-            {
-              resource: resourceName,
-              issue:
-                'DynamoDB table has no auto-scaling enabled. Enable auto-scaling to reduce costs.',
-              severity: 'MEDIUM',
-              category: 'Cost Optimization',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::DynamoDB::Table' &&
+        !resource.Properties?.BillingMode
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'DynamoDB table has no auto-scaling enabled. Enable auto-scaling to reduce costs.',
+              'Set the BillingMode to PAY_PER_REQUEST or configure Auto Scaling on Read and Write capacities to optimize costs dynamically.',
+              'MEDIUM',
+              'Cost Optimization'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 export const checkEC2InstanceType = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::EC2::Instance' &&
-      resource.Properties?.InstanceType?.toString().startsWith('t2')
-        ? [
-            {
-              resource: resourceName,
-              issue:
-                'EC2 instance is using an older t2 instance. Consider upgrading to t3 for better performance and cost savings.',
-              severity: 'MEDIUM',
-              category: 'Cost Optimization',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::EC2::Instance' &&
+        resource.Properties?.InstanceType?.toString().startsWith('t2')
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'EC2 instance is using an older t2 instance. Consider upgrading to t3 for better performance and cost savings.',
+              'Upgrade to a t3 instance for improved performance, lower latency, and better cost efficiency.',
+              'MEDIUM',
+              'Cost Optimization'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 export const checkS3IntelligentTiering = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::S3::Bucket' &&
-      !resource.Properties?.IntelligentTieringConfiguration
-        ? [
-            {
-              resource: resourceName,
-              issue:
-                'S3 Bucket does not use Intelligent-Tiering. Consider enabling it for cost optimization.',
-              severity: 'LOW',
-              category: 'Cost Optimization',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::S3::Bucket' &&
+        !resource.Properties?.IntelligentTieringConfiguration
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'S3 Bucket does not use Intelligent-Tiering. Consider enabling it for cost optimization.',
+              'Enable Intelligent-Tiering for automatic cost optimization of infrequently accessed objects.',
+              'LOW',
+              'Cost Optimization'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 export const checkRDSMultiAZ = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::RDS::DBInstance' &&
-      resource.Properties?.MultiAZ &&
-      resource.Properties?.StorageType === 'gp2'
-        ? [
-            {
-              resource: resourceName,
-              issue:
-                'RDS instance is using Multi-AZ with gp2 storage. Consider gp3 for lower costs.',
-              severity: 'MEDIUM',
-              category: 'Cost Optimization',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::RDS::DBInstance' &&
+        resource.Properties?.MultiAZ &&
+        resource.Properties?.StorageType === 'gp2'
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'RDS instance is using Multi-AZ with gp2 storage. Consider gp3 for lower costs.',
+              'Switch to gp3 storage for RDS to reduce costs and improve performance.',
+              'MEDIUM',
+              'Cost Optimization'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 export const checkEBSUnusedVolumes = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::EC2::Volume' && !resource.Properties?.Attachments
-        ? [
-            {
-              resource: resourceName,
-              issue:
-                'EBS Volume is not attached to any instance. Consider deleting to save costs.',
-              severity: 'HIGH',
-              category: 'Cost Optimization',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::EC2::Volume' &&
+        !resource.Properties?.Attachments
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'EBS Volume is not attached to any instance. Consider deleting to save costs.',
+              'Review and delete unused EBS volumes to avoid unnecessary storage costs.',
+              'HIGH',
+              'Cost Optimization'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 export const checkNATGatewayUsage = (
   template: CloudFormationStack
-): SecurityFinding[] =>
-  Object.entries(template.Resources || {}).flatMap(
-    ([resourceName, resource]) =>
-      resource.Type === 'AWS::EC2::NatGateway' &&
-      !resource.Properties?.SubnetRouteTableAssociations
-        ? [
-            {
-              resource: resourceName,
-              issue:
-                'NAT Gateway exists but lacks a route table association. Review usage to avoid unnecessary costs.',
-              severity: 'LOW',
-              category: 'Cost Optimization',
-            },
-          ]
-        : []
+): AnalysisResults =>
+  Object.entries(template.Resources || {}).reduce(
+    (acc, [resourceName, resource]) => {
+      if (
+        resource.Type === 'AWS::EC2::NatGateway' &&
+        !resource.Properties?.SubnetRouteTableAssociations
+      ) {
+        acc[resourceName] = {
+          issues: [
+            createFinding(
+              resourceName,
+              'NAT Gateway exists but lacks a route table association. Review usage to avoid unnecessary costs.',
+              'Ensure NAT Gateways are only provisioned when necessary and associated with a valid route table.',
+              'LOW',
+              'Cost Optimization'
+            ),
+          ],
+        };
+      }
+      return acc;
+    },
+    {} as AnalysisResults
   );
 
 // ----------------------------
@@ -485,9 +685,9 @@ export const checkNATGatewayUsage = (
 export const analyzeTemplate = (
   cloudformationTemplate: CloudFormationStack,
   selectedServices: string[] = []
-): SecurityFinding[] => {
+): AnalysisResults => {
   const serviceChecks: {
-    [key: string]: ((template: CloudFormationStack) => SecurityFinding[])[];
+    [key: string]: ((template: CloudFormationStack) => AnalysisResults)[];
   } = {
     IAM: [checkIamPolicies],
     S3: [checkS3Buckets, checkS3IntelligentTiering],
@@ -508,16 +708,27 @@ export const analyzeTemplate = (
     EBS: [checkEBSUnusedVolumes],
     NATGateway: [checkNATGatewayUsage],
   };
-
+  console.log(selectedServices, 'the selected services');
   const checks = selectedServices.length
     ? selectedServices.flatMap((service) =>
         serviceChecks[service] ? serviceChecks[service] : []
       )
     : Object.values(serviceChecks).flat();
 
-  const findings = checks.flatMap((check) => check(cloudformationTemplate));
+  console.log(checks, 'the checks');
+  const findings: AnalysisResults = {};
 
-  if (findings.length === 0) {
+  checks.forEach((check) => {
+    const result = check(cloudformationTemplate);
+    Object.entries(result).forEach(([resourceName, finding]) => {
+      if (!findings[resourceName]) {
+        findings[resourceName] = { issues: [] };
+      }
+      findings[resourceName].issues.push(...finding.issues);
+    });
+  });
+
+  if (Object.keys(findings).length === 0) {
     console.log('\x1b[32m✅ No security or cost issues detected!\x1b[0m\n');
     process.exit(0);
   }

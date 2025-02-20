@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import fs, { writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 import { analyzeTemplate as runStaticAnalysis } from './analysis/staticAnalysis';
@@ -22,6 +23,7 @@ const getSelectedServices = (): string[] | undefined => {
   const selectedServicesArg = args.find((arg) =>
     arg.startsWith('--selected-services=')
   );
+
   return selectedServicesArg
     ? selectedServicesArg.replace('--selected-services=', '').split(',')
     : undefined;
@@ -55,7 +57,8 @@ const validateLicenseWithAPI = async (
 const synthesizeCdkStack = (): CloudFormationStack => {
   try {
     console.log('🔍 Running CDK Synth...');
-    const synthOutput = execSync('cdk synth --json', { encoding: 'utf-8' });
+    execSync('cdk synth --json > cdk-synth-output.json', { stdio: 'inherit' });
+    const synthOutput = fs.readFileSync('cdk-synth-output.json', 'utf-8');
     console.log('✅ CDK Synth complete. Parsing output...');
     return JSON.parse(synthOutput);
   } catch (error) {
@@ -81,24 +84,16 @@ const runAnalysis = async (): Promise<void> => {
 
   const licenseKey = getLicenseKey();
 
-  if (!licenseKey) {
-    writeFileSync(
-      'ai_analysis_report.json',
-      JSON.stringify(staticAnalysisFindings, null, 2)
-    );
-    console.info(
-      'For deeper, AI-powered analysis, provide a valid license key.'
-    );
-  }
-
-  //   const isValidLicense = await validateLicenseWithAPI(licenseKey);
-
-  //   if (!isValidLicense) {
-  //     console.error(
-  //       'Invalid or missing license key. AI analysis is only available for paid users.'
-  //     );
-  //     process.exit(1);
-  //   }
+  // if (!licenseKey) {
+  //   writeFileSync(
+  //     'ai_analysis_report.json',
+  //     JSON.stringify(staticAnalysisFindings, null, 2)
+  //   );
+  //   console.info(
+  //     'For deeper, AI-powered analysis, provide a valid license key.'
+  //   );
+  //   return;
+  // }
 
   console.log('Running AI analysis...');
 
@@ -120,7 +115,14 @@ const runAnalysis = async (): Promise<void> => {
     : template.Resources;
 
   const aiFindings = await analyzeMultipleResources(filteredResources, aiModes);
-  const combinedFindings = { ...staticAnalysisFindings, ...aiFindings };
+
+  // **Merge AI findings into static analysis findings**
+  Object.entries(aiFindings).forEach(([resourceName, aiResult]) => {
+    if (!staticAnalysisFindings[resourceName]) {
+      staticAnalysisFindings[resourceName] = { issues: [] };
+    }
+    staticAnalysisFindings[resourceName].issues.push(...aiResult.issues);
+  });
 
   // Save AI findings to a JSON report
   console.log(
@@ -128,9 +130,8 @@ const runAnalysis = async (): Promise<void> => {
   );
   writeFileSync(
     'ai_analysis_report.json',
-    JSON.stringify(combinedFindings, null, 2)
+    JSON.stringify(staticAnalysisFindings, null, 2)
   );
   console.log('Analysis complete.');
 };
-
 runAnalysis();
